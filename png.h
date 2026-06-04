@@ -18,7 +18,7 @@ typedef enum {
   PNG_RGBA16 = PNG_RGBA | PNG_16BIT              //64
 } png_type;
 
-int png_write(const char *fn, const void *data, uint32_t width, uint32_t height, png_type type, const char **text);
+int png_write(const char *fn, const uint8_t *data, uint32_t width, uint32_t height, png_type type, const char **text);
 
 #ifdef PNG_IMPLEMENTATION
 
@@ -40,7 +40,8 @@ static const uint32_t crc_table[256] = {
   0x86D3D2D4, 0xF1D4E242, 0x68DDB3F8, 0x1FDA836E, 0x81BE16CD, 0xF6B9265B, 0x6FB077E1, 0x18B74777, 0x88085AE6, 0xFF0F6A70, 0x66063BCA, 0x11010B5C, 0x8F659EFF, 0xF862AE69, 0x616BFFD3, 0x166CCF45,
   0xA00AE278, 0xD70DD2EE, 0x4E048354, 0x3903B3C2, 0xA7672661, 0xD06016F7, 0x4969474D, 0x3E6E77DB, 0xAED16A4A, 0xD9D65ADC, 0x40DF0B66, 0x37D83BF0, 0xA9BCAE53, 0xDEBB9EC5, 0x47B2CF7F, 0x30B5FFE9,
   0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605, 0xCDD70693, 0x54DE5729, 0x23D967BF, 0xB3667A2E, 0xC4614AB8, 0x5D681B02, 0x2A6F2B94, 0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D
-};*/
+};
+*/
 
 static uint32_t crc_table[256];
 
@@ -60,7 +61,7 @@ static void crc32adler(uint32_t *crc, uint32_t *adler, const uint8_t *data, uint
   *crc = c;
 }
 
-int png_write(const char *fn, const void *data, uint32_t width, uint32_t height, png_type type, const char **text){
+int png_write(const char *fn, const uint8_t *data, uint32_t width, uint32_t height, png_type type, const char **text){
   const uint8_t  bpp        =   (type & PNG_16BIT) ? 16 : 8, 
                  rgb        = !!(type & PNG_RGB), 
                  alpha      = !!(type & PNG_ALPHA);
@@ -68,8 +69,8 @@ int png_write(const char *fn, const void *data, uint32_t width, uint32_t height,
                  data_bytes = (row_bytes + 1) * height,
                  num_blocks = (data_bytes + 65534) / 65535;
 
-  uint32_t       crc = 0xFFFFFFFF, adler = 1, lastblock=0;
-  uint64_t       x=0, y=0, pos=0, num=0;
+  uint32_t       crc = 0xFFFFFFFF, adler = 1, lastblock = 0;
+  uint64_t       x = 0, y = 0, pos = 0, num = 0;
 
   #define DW(x) (x)>>24, (x)>>16, (x)>>8, (x)
   #define FWRITE_(f,...) do{ const uint8_t d[] = {__VA_ARGS__}; if (sizeof(d) != fwrite(d, 1, sizeof(d), f)) return fclose(f),-2; } while(0)
@@ -84,7 +85,7 @@ int png_write(const char *fn, const void *data, uint32_t width, uint32_t height,
 
   FWRITE_(f, DW(13));                                                                   //IHDR length without crc
   FWRITEC(f, 'I', 'H', 'D', 'R', DW(width), DW(height), bpp, 2*rgb+4*alpha, 0, 0, 0);   //IHDR & calc IHDR crc
-  FWRITE_(f, DW(crc^0xFFFFFFFF));                                                       //IHDR CRC 
+  FWRITE_(f, DW(~crc));                                                       //IHDR CRC 
 
   FWRITE_(f, DW(data_bytes + 2 + 5 * num_blocks + 4));                //IDAT length without crc
   FWRITE_(f, 'I', 'D', 'A', 'T', 0x78, 0x01);                         //IDAT header + zlib header
@@ -94,7 +95,7 @@ int png_write(const char *fn, const void *data, uint32_t width, uint32_t height,
     if (pos == 0) FWRITEC(f, lastblock, num, num>>8, ~num, ~num>>8);  //new block, write deflate block header
     if (x   + num > row_bytes) num = row_bytes - x;                   //row ends before block, write only till end of row
     if (x   == 0) {                                                   //new row
-      if (1 != fwrite((uint8_t[]){0}, 1, 1, f)) return fclose(f),-2;  //row filter == 0
+      FWRITE_(f, 0);                                                  //row filter == 0
       crc32adler(&crc, &adler, (uint8_t[]){0}, 1);                    //update adler&crc with single 0 byte
       pos += 1;
       num -= 1;
@@ -106,7 +107,7 @@ int png_write(const char *fn, const void *data, uint32_t width, uint32_t height,
     if ((x   += num) >= row_bytes) {x = 0; y += 1;}  //row complete
   }                                                  //IDAT chunk complete
   FWRITEC(f, DW(adler));                             //zlib checksum
-  FWRITE_(f, DW(crc^0xFFFFFFFF));                    //IDAT CRC
+  FWRITE_(f, DW(~crc));                    //IDAT CRC
 
   if (text) while(*text){
     uint32_t len = strlen(*text);
@@ -114,7 +115,7 @@ int png_write(const char *fn, const void *data, uint32_t width, uint32_t height,
     FWRITE_(f, DW(len), 't', 'E', 'X', 't');
     if (len != fwrite(*text, 1, len, f)) return fclose(f),-2;
     crc = crc32(0x69BD3A7A, *text++, len);        //crc of 't', 'E', 'X', 't'
-    FWRITE_(f, DW(crc^0xFFFFFFFF));
+    FWRITE_(f, DW(~crc));
   }
 
   FWRITE_(f, DW(0), 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82);
