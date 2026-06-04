@@ -1,10 +1,6 @@
 local crc_table = {};
 
-for i=0,255 do 
-  local c = i
-  for j=1,8 do c = (0xedb88320*(c&1))~(c>>1); end
-  crc_table[i] = c
-end
+for i=0,255 do for j=0,8 do crc_table[i] = (j==0) and i or ((0xedb88320*(crc_table[i]&1))~(crc_table[i]>>1)) end end
 
 local function crc32(crc, adler, data)
   local a,b = adler & 0xFFFF, (adler >> 16) & 0xFFFF
@@ -28,14 +24,14 @@ png.RGBA16 = png.RGBA | png.BIT16
 
 png.write = function (fn, data, width, height, colordepth, text)
   local bpp        = ((colordepth & png.BIT16) ~=0) and 16 or 8
-  local rgb        = ((colordepth & png.RGB) ~=0)   and 1  or 0 
+  local rgb        = ((colordepth & png.RGB)   ~=0) and 1  or 0 
   local alpha      = ((colordepth & png.ALPHA) ~=0) and 1  or 0
   local row_bytes  = width * (1+2*rgb+alpha) * bpp >> 3
   local data_bytes = (row_bytes + 1) * height
   local num_blocks = math.floor((data_bytes + 65534) / 65535)
 
   local file = io.open(fn, "wb");
-  if not file then return end
+  if not file then return false end
 
   local ihdr = "IHDR"..(">I4I4BB"):pack(width,height,bpp,2*rgb+4*alpha).."\x00\x00\x00"
   file:write(
@@ -54,8 +50,8 @@ png.write = function (fn, data, width, height, colordepth, text)
       file:write(h)
       crc = crc32(crc, 0, h)
     end
-    if (x   + num > row_bytes) then num = row_bytes - x end
-    if (x   == 0) then
+    if (x + num > row_bytes) then num = row_bytes - x end
+    if (x == 0) then
       file:write("\x00")
       crc, adler = crc32(crc, adler, "\x00")
       pos = pos + 1;
@@ -76,6 +72,7 @@ png.write = function (fn, data, width, height, colordepth, text)
 
   file:write("\x00\x00\x00\x00IEND\xAE\x42\x60\x82");
   file:close(f);
+  return true
 end
 
 return png
