@@ -122,8 +122,8 @@ int png_write(const char *fn, const uint8_t *data, uint32_t width, uint32_t heig
   fclose(f);
   return 0;
   #undef DW
-  #undef WRITE_
-  #undef WRITEC
+  #undef FWRITE_
+  #undef FWRITEC
 }
 
 #endif  //#ifdef PNG_IMPLEMENTATION
